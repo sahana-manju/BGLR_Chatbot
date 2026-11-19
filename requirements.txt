@@ -5,4 +5,4 @@ uvicorn
 openpyxl
 google-generativeai
 langgraph
-langchain-openai
+

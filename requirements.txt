@@ -4,6 +4,7 @@ langchain-chroma
 uvicorn
 openpyxl
 google-generativeai
+langchain-google-genai
 langgraph
 fastapi
 jinja2

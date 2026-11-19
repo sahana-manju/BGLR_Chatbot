@@ -7,3 +7,4 @@ google-generativeai
 langgraph
 fastapi
 jinja2
+pandas

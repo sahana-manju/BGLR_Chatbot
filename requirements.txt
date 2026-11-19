@@ -6,3 +6,4 @@ openpyxl
 google-generativeai
 langgraph
 fastapi
+jinja2

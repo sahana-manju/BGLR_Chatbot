@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 import os
 import json
-from rag import retriever
+from rag import retrieve_bglr_context
 import re
 from html import escape
 
@@ -241,7 +241,7 @@ def constraint_checker(state):
 def response_agent(state):
 
     print("response")
-    rag_context = retriever.invoke(state["user_message"])
+    rag_context = retrieve_bglr_context.query(state["user_message"],1)
     # for i,doc in enumerate(rag_context):
     #     print("=" * 80)
     #     print(f"RESULT {i + 1}")

@@ -8,7 +8,15 @@ from langchain_core.documents import Document
 import os
 from dotenv import load_dotenv
 import re
+from database import SessionLocal, engine, Base, get_db
+from sqlalchemy.orm import Session
+import models
 load_dotenv()
+
+## Load Postgres Database instance
+
+Base.metadata.create_all(bind=engine)
+db = SessionLocal()
 
 ## Loading the documents from Code Folder
 codes_folder_path = "Codes/"
@@ -23,6 +31,7 @@ loader_obj = DirectoryLoader(
 
 docs = loader_obj.load()
 
+
 # print("Loaded "+ str(len(docs)) + " documents")
 # if docs:
 #     print(docs[0].metadata)
@@ -35,26 +44,80 @@ docs = loader_obj.load()
 #     chunk_overlap = 150
 # )
 
+def extract_section(pattern, text):
+
+    match = re.search(
+        pattern,
+        text,
+        flags=re.DOTALL | re.IGNORECASE
+    )
+
+    return match.group(1).strip() if match else ""
+
 # chunks = text_splitter_obj.split_documents(docs)
 logical_chunks = []
-for doc in docs:
-    chunks = [
-    chunk.strip()
-    for chunk in re.findall(
-        r'<!--chunk starts -->(.*?)<!--chunk ends -->',
-        doc.page_content,
-        flags=re.DOTALL
-    )
-    if chunk.strip()
-]
-    
-    for chunk in chunks:
-        chunk_final = Document(
-                        page_content = chunk,
-                        metadata = {**doc.metadata}
-                            )
+try:
+    for doc in docs:
+        text = doc.page_content
 
-        logical_chunks.append(chunk_final)
+        source = doc.metadata.get("source", "")
+
+        # Extract markdown filename without extension
+        document_id = os.path.splitext(os.path.basename(source))[0]
+        print(document_id)
+
+        # Extract introduction
+        intro = extract_section(
+            r'<!--\s*intro starts\s*-->(.*?)<!--\s*intro ends\s*-->',
+            text
+        )
+
+        # Extract optional skills
+        skills = extract_section(
+            r'<!--\s*skills starts\s*-->(.*?)<!--\s*skills ends\s*-->',
+            text
+        )
+
+        chunks = [
+        chunk.strip()
+        for chunk in re.findall(
+            r'<!--chunk starts -->(.*?)<!--chunk ends -->',
+            doc.page_content,
+            flags=re.DOTALL
+        )
+        if chunk.strip()
+    ]
+        chunk_names = []
+        for i in range(len(chunks)):
+            chunk_id = f"{document_id}_{i}"
+            chunk_names.append(chunk_id)
+            chunk_final = Document(
+                            page_content = chunks[i],
+                            metadata={
+                "chunk_id": chunk_id,
+                "document_id": document_id,
+                "chunk_index": i,
+                "source": source,
+                "package": "BGLR"
+            }
+                                )
+
+            logical_chunks.append(chunk_final)
+        print(chunk_names)
+        document_data = models.Documents(
+            document_id=document_id,
+            intro = intro,
+            skills = skills,
+            chunks=chunk_names,
+        )
+
+        db.add(document_data)
+        db.commit()
+except Exception as e:
+    db.rollback()
+    raise e
+finally:
+    db.close()
 
 
 
@@ -80,8 +143,89 @@ vectorstore = Chroma.from_documents(
     persist_directory="./chroma_db"
 )
 
+
+
+def retrieve_bglr_context(query, k=3):
+
+    # 1. Retrieve relevant logical chunks
+    results = vectorstore.similarity_search(
+        query,
+        k=k
+    )
+
+    retrieved_context = []
+
+    # Avoid fetching the same document repeatedly
+    document_cache = {}
+
+    for chunk in results:
+        print(chunk.metadata)
+
+        document_id = chunk.metadata["document_id"]
+
+        # 2. Fetch parent document information
+        if document_id not in document_cache:
+
+            row = db.query(models.Documents).filter(
+                models.Documents.document_id == document_id
+            ).first()
+
+
+            if row:
+
+                document_cache[document_id] = {
+                    "intro": row.intro,
+                    "skills": row.skills,
+                    "related_chunks": row.chunks
+                }
+
+        # 3. Combine document and chunk information
+        doc_info = document_cache.get(document_id)
+
+        if doc_info:
+
+            retrieved_context.append({
+
+                "document_id": document_id,
+
+                "intro": doc_info["intro"],
+
+                "skills": doc_info["skills"],
+
+                "related_chunks": doc_info["related_chunks"],
+
+                "chunk": chunk.page_content,
+
+                "chunk_metadata": chunk.metadata
+
+            })
+
+    db.close()
+
+    return retrieved_context
+
+query = "How do I fit a linear regression with fixed effects in BGLR?"
+
+# context = retrieve_bglr_context(query, k=3)
+
+# for item in context:
+
+#     print("=" * 80)
+
+#     print("\nINTRO:")
+#     print(item["intro"])
+
+#     print("\nSKILLS:")
+#     print(item["skills"])
+
+#     print("\RELATED CHUNKIDS:")
+#     print(item["related_chunks"])
+
+#     print("\nRETRIEVED CODE CHUNK:")
+#     print(item["chunk"])
+
 ## Only get the single most similar document from the dataset
-retriever = vectorstore.as_retriever(search_kwargs={"k": 1})
+#retriever = vectorstore.as_retriever(search_kwargs={"k": 1})
 
 ## Testing retrieval for a query
 #query = "Can you please give me code for random regression using flat prior "
